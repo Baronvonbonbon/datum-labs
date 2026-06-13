@@ -87,6 +87,15 @@ live, policy rejects non-allowed campaigns, co-signer refuses non-owned campaign
 - Key management: hot relaySigner key separate from the publisher's cold key (the toolkit
   should default to `setRelaySigner(hotKey)` rather than signing with the account key).
 - Secret rotation tooling.
+- ✅ **Dual-sig independence gate (A1, 2026-06-13).** A publicly-exposed relay
+  (`HTTP_BIND` ≠ loopback, or `RELAY_PUBLIC=1`) now **refuses to start** in "self-cosign"
+  mode — i.e. with `ADVERTISER_PRIVATE_KEY` set and no independent co-signer — because that
+  collapses dual-sig refutation (one operator signs both sides). Production must run an
+  **independent advertiser co-signer** (`ADVERTISER_COSIGNER_URL`/`ADVERTISER_COSIGNERS`,
+  `ADVERTISER_PRIVATE_KEY` unset). Loopback dev may self-cosign with a loud `[SECURITY]`
+  warning; an exposed relay may only do so via the explicit `ALLOW_INSECURE_SELF_COSIGN=1`.
+  Backstopped on-chain: `DatumDualSigSettlement` reverts `E89` if both signatures recover to
+  the same key. (Regulatory rationale + evidence: `../datum-venture/regulatory/18-relay-independence-verification.md`.)
 
 ### 5. Economics & multi-tenancy
 - **Fee model**: the relay pays gas — let operators take a cut (config'd bps) so it's

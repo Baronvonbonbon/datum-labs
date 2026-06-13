@@ -49,6 +49,15 @@ export const MAX_INFLIGHT = Number(process.env.MAX_INFLIGHT || 25);
 export const SETTLE_STUCK_MS = Number(process.env.SETTLE_STUCK_MS || 30000);
 export const LOG_LEVEL = Number(process.env.LOG_LEVEL || 1);
 
+// A1 / dual-sig independence gate. RELAY_PUBLIC=1 declares this relay is (or will
+// be) reachable beyond loopback. ALLOW_INSECURE_SELF_COSIGN=1 is an explicit,
+// auditable acknowledgement that the operator is running the "self-cosign" mode
+// (relay holds the advertiser key and signs BOTH sides), which DISABLES dual-sig
+// refutation — permitted only for a trusted single-operator dev/lab run.
+const flag = (v) => /^(1|true|yes)$/i.test((v || "").trim());
+export const RELAY_PUBLIC = flag(process.env.RELAY_PUBLIC);
+export const ALLOW_INSECURE_SELF_COSIGN = flag(process.env.ALLOW_INSECURE_SELF_COSIGN);
+
 export const CAMPAIGN_ALLOWLIST = (process.env.CAMPAIGN_ALLOWLIST || "")
   .split(",")
   .map((s) => s.trim())
@@ -78,9 +87,45 @@ export function addresses() {
   return _addr;
 }
 
+// Loopback binds where a self-cosign relay is reachable only by the local
+// operator. 0.0.0.0 binds all interfaces → treated as exposed, not loopback.
+const LOOPBACK_BINDS = new Set(["127.0.0.1", "::1", "localhost"]);
+
 export function assertConfig() {
   const ZERO = "0x" + "0".repeat(64);
   if (!RELAY_PRIVATE_KEY || RELAY_PRIVATE_KEY === ZERO) {
     throw new Error("RELAY_PRIVATE_KEY is required (and must be the publisher's registered relay signer).");
+  }
+
+  // ── A1 independence gate ─────────────────────────────────────────────────
+  // "self-cosign" = the relay holds the advertiser key (ADVERTISER_PRIVATE_KEY)
+  // AND no independent advertiser co-signer is configured, so the relay would
+  // produce BOTH the publisher and advertiser signatures itself. That collapses
+  // dual-sig refutation: there is no independent party who can withhold a sig.
+  const hasAdvKey = !!ADVERTISER_PRIVATE_KEY && ADVERTISER_PRIVATE_KEY !== ZERO;
+  const hasCosigner = !!ADVERTISER_COSIGNER_URL || Object.keys(ADVERTISER_COSIGNERS).length > 0;
+  const selfCosign = hasAdvKey && !hasCosigner;
+
+  if (selfCosign) {
+    const exposed = RELAY_PUBLIC || !LOOPBACK_BINDS.has(HTTP_BIND);
+    if (exposed && !ALLOW_INSECURE_SELF_COSIGN) {
+      throw new Error(
+        "REFUSING TO START: self-cosign mode is active (relay holds ADVERTISER_PRIVATE_KEY and " +
+        "would sign BOTH the publisher and advertiser sides), which defeats dual-sig refutation — " +
+        "one operator controls both signatures. This is forbidden on a relay reachable beyond " +
+        `loopback (HTTP_BIND=${HTTP_BIND}, RELAY_PUBLIC=${RELAY_PUBLIC}).\n` +
+        "Fix: run an independent advertiser co-signer and set ADVERTISER_COSIGNER_URL (or " +
+        "ADVERTISER_COSIGNERS) and UNSET ADVERTISER_PRIVATE_KEY. For a trusted single-operator " +
+        "dev/lab run only, set ALLOW_INSECURE_SELF_COSIGN=1 to explicitly acknowledge the risk."
+      );
+    }
+    // Permitted (loopback dev, or explicit override): make the loss of the
+    // refutation guarantee impossible to miss.
+    console.warn(
+      "\x1b[33m[SECURITY] self-cosign mode ACTIVE — the relay holds the advertiser key and signs " +
+      "BOTH sides; dual-sig refutation is DISABLED (no independent party can refuse). " +
+      (ALLOW_INSECURE_SELF_COSIGN ? "Permitted via ALLOW_INSECURE_SELF_COSIGN." : "Permitted only because bound to loopback.") +
+      " Do NOT use for production value.\x1b[0m"
+    );
   }
 }

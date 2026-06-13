@@ -233,7 +233,7 @@ export class ClaimQueue {
     // Now that DUALSIG_ABI carries the error fragments, these decode to names
     // (E82 = publisher-sig, E83/E85 = advertiser-sig, etc.) instead of an opaque
     // selector, so they match here rather than silently burning 3 retries.
-    if (/E(00|11|18|27|28|32|34|8[0-5])\b/.test(msg)) {
+    if (/E(00|11|18|27|28|32|34|8[0-9])\b/.test(msg)) {
       log.warn("claim rejected (terminal)", { reason, campaignId });
       return;
     }

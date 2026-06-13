@@ -11,11 +11,12 @@ export const SIGNED_BATCH_TUPLE =
 // Settlement custom errors so ethers can DECODE reverts (otherwise estimateGas
 // reverts surface as "unknown custom error" + a raw selector, and the relay can't
 // tell a terminal bad-claim from a transient failure). E80-E85 = dual-sig envelope
-// (deadline / publisher sig / advertiser sig); the rest are validator/settlement gates.
+// (deadline / publisher sig / advertiser sig); E89 = same-key independence guard
+// (publisher & advertiser sigs from one key); the rest are validator/settlement gates.
 const SETTLEMENT_ERRORS = [
   "error E00()", "error E11()", "error E18()", "error E27()", "error E28()",
   "error E32()", "error E34()", "error E80()", "error E81()", "error E82()",
-  "error E83()", "error E84()", "error E85()", "error Paused()", "error OnlyDualSig()",
+  "error E83()", "error E84()", "error E85()", "error E89()", "error Paused()", "error OnlyDualSig()",
 ];
 export const DUALSIG_ABI = [`function settleSignedClaims(${SIGNED_BATCH_TUPLE}[] batches)`, ...SETTLEMENT_ERRORS];
 

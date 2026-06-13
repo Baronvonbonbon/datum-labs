@@ -1,0 +1,18 @@
+{
+  "name": "datum-publisher-shortener",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tier-1 DATUM publisher: an ad-supported URL shortener. Short links resolve through an interstitial page carrying a DATUM ad slot — the canonical high-impression-density publisher for stress-testing the network.",
+  "scripts": {
+    "start": "node src/server.js",
+    "reset": "rm -f data/links.db"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

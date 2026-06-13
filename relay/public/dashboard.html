@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DATUM Relay — Operator Console</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+      :root{--bg:#0a0d14;--panel:#121722;--line:#222a3a;--txt:#e6e9f0;--mut:#8b93a7;--acc:#5eead4;--ok:#4ade80;--warn:#fbbf24;--err:#f87171;--blue:#818cf8}
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{background:var(--bg);color:var(--txt);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+      header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+      h1{font-size:15px;font-weight:700;letter-spacing:.3px}
+      .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+      .badge{font:600 11px/1 ui-monospace,monospace;padding:4px 8px;border-radius:6px;border:1px solid var(--line);color:var(--mut)}
+      .badge.on{color:var(--ok);border-color:#2c5}.badge.off{color:var(--warn);border-color:#a83}.badge.local{color:var(--blue);border-color:#55a}
+      .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      main{padding:18px 24px;max-width:1200px;margin:0 auto}
+      .grid{display:grid;gap:14px}.kpis{grid-template-columns:repeat(auto-fit,minmax(118px,1fr));margin-bottom:16px}
+      .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+      .kpi .v{font-size:20px;font-weight:700}.kpi .l{color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+      .kpi .v.warn{color:var(--warn)}.kpi .v.err{color:var(--err)}.kpi .v.acc{color:var(--acc)}.kpi .v.blue{color:var(--blue)}
+      .cols{grid-template-columns:1fr 1fr}.cols3{grid-template-columns:1.2fr 1fr 1fr}
+      .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+      .card h2{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+      table{width:100%;border-collapse:collapse;font-size:12.5px}
+      th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-weight:600}
+      td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+      .pill{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 ui-monospace,monospace;padding:4px 7px;border-radius:5px;background:#0a0d14;border:1px solid var(--line);margin:2px 3px 0 0}
+      .pill b{cursor:pointer;color:var(--mut)}.pill b:hover{color:var(--err)}
+      input,select,textarea{background:#0a0d14;border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:6px 8px;font:12px ui-monospace,monospace}
+      input{width:100%}textarea{width:100%;min-height:180px;resize:vertical}
+      button{background:#1b2233;border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:6px 10px;font-size:12px;cursor:pointer}
+      button:hover{border-color:var(--acc)}button.ok{border-color:#2c5;color:var(--ok)}button.bad{border-color:#a44;color:var(--err)}button.pri{background:var(--acc);color:#06281f;border-color:var(--acc);font-weight:700}
+      .row{display:flex;gap:8px;align-items:center;margin-top:8px}
+      .muted{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}
+      label{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+      a{color:var(--acc)} details summary{cursor:pointer;color:var(--mut);font-size:12px}
+      @media(max-width:920px){.cols,.cols3{grid-template-columns:1fr}}
+      footer{color:var(--mut);font-size:11px;padding:8px 24px 28px;max-width:1200px;margin:0 auto}
+      #toast{position:fixed;bottom:16px;right:16px;background:#1b2233;border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+      #toast.show{opacity:1}
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="dot" id="health" style="background:var(--mut)"></span>
+      <h1>DATUM Relay · Operator Console</h1>
+      <span class="badge local">LOCAL</span>
+      <span class="badge mono" id="signer">—</span>
+      <span class="badge" id="chain">chain —</span>
+      <span class="badge" id="auth">auth —</span>
+      <span class="badge" id="mode">signing —</span>
+      <span class="muted" id="ts" style="margin-left:auto;font-size:12px"></span>
+    </header>
+    <main>
+      <div class="grid kpis" id="kpis"></div>
+
+      <div class="grid cols3">
+        <div class="card"><h2>Settlement throughput / min</h2><canvas id="tput" height="80"></canvas></div>
+        <div class="card">
+          <h2>Signing mode</h2>
+          <label>Default for relayed claim batches</label>
+          <div class="row"><select id="signSel" style="flex:1"><option value="auto">auto — co-sign + submit programmatically</option><option value="manual">manual — hold for my approval</option></select></div>
+          <p class="muted" style="margin-top:8px;font-size:11.5px">Per-campaign manual overrides: edit <span class="mono">signing.manualCampaigns</span> in the raw config below.</p>
+        </div>
+        <div class="card">
+          <h2>Co-signer</h2>
+          <div id="cosigner" class="muted">—</div>
+        </div>
+      </div>
+
+      <div class="grid cols" style="margin-top:14px">
+        <div class="card">
+          <h2>Pending approval <span id="paCount" class="badge">0</span></h2>
+          <div id="approvals" class="muted">none</div>
+        </div>
+        <div class="card">
+          <h2>Policy — what this relay serves</h2>
+          <label>Accepted publishers <span class="muted" id="pubOpen"></span></label>
+          <div id="pubs" style="margin:4px 0 6px"></div>
+          <div class="row"><input id="pubIn" placeholder="0x publisher address" /><button onclick="addPub()">Add</button></div>
+          <label style="display:block;margin-top:12px">Accepted campaigns <span class="muted" id="campOpen"></span></label>
+          <div id="camps" style="margin:4px 0 6px"></div>
+          <div class="row"><input id="campIn" placeholder="campaign id" /><button onclick="addCamp()">Add</button></div>
+          <label style="display:block;margin-top:12px">Max CPM (planck, 0 = no cap)</label>
+          <div class="row"><input id="cpmIn" placeholder="0" /><button onclick="saveCpm()">Set</button> <span class="muted" id="cpmCur"></span></div>
+        </div>
+      </div>
+
+      <div class="grid cols" style="margin-top:14px">
+        <div class="card"><h2>Recent events</h2><div id="events" class="muted">—</div></div>
+        <div class="card">
+          <h2>Advanced — raw config</h2>
+          <details>
+            <summary>Edit <span class="mono" id="cfgPath"></span> directly</summary>
+            <textarea id="rawCfg" style="margin-top:8px"></textarea>
+            <div class="row"><button class="pri" onclick="saveRaw()">Save config</button><button onclick="loadRaw()">Reload</button><span class="muted">applies hot (no restart)</span></div>
+          </details>
+          <p class="muted" style="margin-top:10px;font-size:11.5px">Config file: <span class="mono" id="cfgPath2"></span> · advertiser policy lives in the co-signer service.</p>
+        </div>
+      </div>
+    </main>
+    <footer>Local-only console (admin server). Public claim API runs separately and is the only thing tunnel-exposed.</footer>
+    <div id="toast"></div>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const dotF = (p) => (p == null ? "—" : (Number(p) / 1e10).toLocaleString(undefined, { maximumFractionDigits: 3 }) + " PAS");
+      const short = (a) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "—");
+      const dur = (ms) => { const s = Math.floor(ms/1000), h = Math.floor(s/3600), m = Math.floor((s%3600)/60); return h?`${h}h${m}m`:`${m}m`; };
+      let toastT;
+      function toast(msg, bad) { const t=$("toast"); t.textContent=msg; t.style.borderColor=bad?"#a44":"#2c5"; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2200); }
+      async function post(path, body) { const r = await fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); const j=await r.json().catch(()=>({})); if(!r.ok||j.ok===false) toast(j.error||j.reason||"failed",true); else toast("ok"); tick(); return j; }
+
+      window.addPub=()=>{const v=$("pubIn").value.trim(); if(v){post("/api/policy/publisher",{action:"add",address:v}); $("pubIn").value="";}};
+      window.delPub=(a)=>post("/api/policy/publisher",{action:"remove",address:a});
+      window.addCamp=()=>{const v=$("campIn").value.trim(); if(v){post("/api/policy/campaign",{action:"add",id:v}); $("campIn").value="";}};
+      window.delCamp=(id)=>post("/api/policy/campaign",{action:"remove",id});
+      window.saveCpm=()=>post("/api/policy/maxcpm",{value:$("cpmIn").value.trim()||"0"});
+      window.approve=(id)=>post("/api/approve",{id});
+      window.reject=(id)=>post("/api/reject",{id});
+      window.saveRaw=()=>post("/api/config",{raw:$("rawCfg").value});
+      async function loadRaw(){ const j=await (await fetch("/api/config")).json(); $("rawCfg").value=j.raw; $("cfgPath").textContent=j.path; $("cfgPath2").textContent=j.path; }
+      window.loadRaw=loadRaw;
+      $("signSel").addEventListener("change",(e)=>post("/api/signing/mode",{mode:e.target.value}));
+
+      let chart, hist=[], lastConf=null, lastT=null;
+      function initChart(){ chart=new Chart($("tput"),{type:"line",data:{labels:[],datasets:[{data:[],borderColor:"#5eead4",backgroundColor:"rgba(94,234,212,.1)",fill:true,tension:.35,pointRadius:0}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{display:false},y:{beginAtZero:true,ticks:{color:"#8b93a7"},grid:{color:"#222a3a"}}}}}); }
+
+      const KPIS=[["claimsReceived","Received","metrics"],["claimsConfirmed","Confirmed","metrics","acc"],["pendingApproval","Awaiting","metrics","blue"],["claimErrors","Errors","metrics","err"],["inflight","In-flight","metrics","warn"],["queued","Queued","metrics"],["clicksSubmitted","Clicks","metrics"],["_bal","Gas","relay"]];
+
+      async function tick(){
+        let s; try{ s=await (await fetch("/api/status")).json(); }catch{ $("health").style.background="var(--err)"; return; }
+        $("health").style.background="var(--ok)";
+        $("signer").textContent=short(s.relay.signer); $("chain").textContent="chain "+s.relay.chainId;
+        $("auth").textContent=s.auth.enabled?"claim-auth ON":"claim-auth OFF"; $("auth").className="badge "+(s.auth.enabled?"on":"off");
+        $("mode").textContent="signing "+s.policy.signing.mode; $("mode").className="badge "+(s.policy.signing.mode==="manual"?"off":"on");
+        $("ts").textContent="up "+dur(s.relay.uptimeMs)+" · "+new Date(s.ts).toLocaleTimeString();
+        if($("signSel").value!==s.policy.signing.mode && document.activeElement!==$("signSel")) $("signSel").value=s.policy.signing.mode;
+
+        $("kpis").innerHTML=KPIS.map(([k,l,src,cls])=>{ let v=k==="_bal"?dotF(s.relay.balancePlanck):(s[src]?.[k]??0).toLocaleString(); let c=cls&&k!=="_bal"&&(s[src]?.[k]??0)>0?cls:""; if(k==="claimErrors"&&(s.metrics.claimErrors??0)===0)c=""; return `<div class="kpi"><div class="v ${c}">${v}</div><div class="l">${l}</div></div>`; }).join("");
+
+        const now=Date.now(), conf=s.metrics.claimsConfirmed??0;
+        if(lastConf!=null&&now>lastT){ const rate=((conf-lastConf)/((now-lastT)/1000))*60; hist.push(Math.max(0,rate)); if(hist.length>60)hist.shift(); chart.data.labels=hist.map(()=>""); chart.data.datasets[0].data=hist; chart.update("none"); }
+        lastConf=conf; lastT=now;
+
+        const p=s.policy;
+        $("pubOpen").textContent=p.openPublishers?"(ANY — open)":""; $("campOpen").textContent=p.openCampaigns?"(ANY — open)":"";
+        $("pubs").innerHTML=p.publishers.length?p.publishers.map(a=>`<span class="pill">${short(a)}<b onclick="delPub('${a}')">✕</b></span>`).join(""):'<span class="muted">none — open to any</span>';
+        $("camps").innerHTML=p.campaigns.length?p.campaigns.map(id=>`<span class="pill">#${id}<b onclick="delCamp('${id}')">✕</b></span>`).join(""):'<span class="muted">none — open to any</span>';
+        $("cpmCur").textContent=p.maxCpmPlanck==="0"?"no cap":dotF(p.maxCpmPlanck);
+
+        const pa=s.pendingApproval||[]; $("paCount").textContent=pa.length;
+        $("approvals").innerHTML=pa.length?`<table><thead><tr><th>#</th><th>campaign</th><th>publisher</th><th class="n">CPM</th><th></th></tr></thead><tbody>${pa.map(e=>`<tr><td class="mono muted">${e.id}</td><td>#${e.campaignId}</td><td class="mono muted">${short(e.publisher)}</td><td class="n">${e.ratePlanck?dotF(e.ratePlanck):"—"}</td><td class="n"><button class="ok" onclick="approve(${e.id})">Sign</button> <button class="bad" onclick="reject(${e.id})">Reject</button></td></tr>`).join("")}</tbody></table>`:'<span class="muted">none — claims will appear here when signing mode is manual</span>';
+
+        $("events").innerHTML=s.events.length?`<table><tbody>${s.events.slice(0,12).map(e=>`<tr><td>${e.type}</td><td class="mono muted">${e.hash?short(e.hash):(e.campaignId?"#"+e.campaignId:(e.id?"id "+e.id:""))}${e.reason?" "+e.reason:""}</td><td class="n muted">${new Date(e.t).toLocaleTimeString()}</td></tr>`).join("")}</tbody></table>`:'<span class="muted">no events yet</span>';
+
+        if(s.cosigner){ const m=s.cosigner.metrics||{}; $("cosigner").innerHTML=`<div><span class="dot" style="background:${s.cosigner.reachable?"var(--ok)":"var(--err)"}"></span> <span class="mono">${s.cosigner.url}</span></div>`+(s.cosigner.reachable?`<div style="margin-top:6px" class="muted">signer ${short(m.signer)}<br>cosigned <b class="ok">${m.cosigned??0}</b> · refused <b class="warn">${m.refused??0}</b></div>`:'<div class="err" style="margin-top:6px">unreachable</div>'); }
+        else $("cosigner").innerHTML='<span class="muted">none — relay holds advertiser key or local sign</span>';
+      }
+      initChart(); loadRaw(); tick(); setInterval(tick,2500);
+    </script>
+  </body>
+</html>

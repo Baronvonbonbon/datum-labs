@@ -1,0 +1,8 @@
+{
+  "_comment": "Operator policy for the relay. Copy to relay.config.json (or set RELAY_CONFIG). Empty arrays = open (accept any). publishers = the publishers this relay co-signs for (they must have set their on-chain relaySigner to this relay's key). campaigns = optional campaign-id allowlist. policy.maxCpmPlanck = refuse claims above this CPM (0 = no cap).",
+  "publishers": [],
+  "campaigns": [],
+  "policy": {
+    "maxCpmPlanck": "0"
+  }
+}

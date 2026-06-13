@@ -1,0 +1,30 @@
+# ── Dependencies ──────────────────────────────────────────────────────
+node_modules/
+
+# ── Secrets & local env (NEVER commit) ────────────────────────────────
+.env
+.env.*
+!.env.example
+secrets.env
+*.secret
+
+# ── Operator-local / infra config (not shareable templates) ───────────
+relay/relay.config.json
+*.bak-*
+deploy/config.yml.shared-proposed
+
+# ── Runtime data / databases ──────────────────────────────────────────
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# ── Logs & pids ───────────────────────────────────────────────────────
+*.log
+*.pid
+
+# ── Folded-in nested git history ──────────────────────────────────────
+**/.git.disabled/
+
+# ── OS cruft ──────────────────────────────────────────────────────────
+.DS_Store

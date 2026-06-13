@@ -1,0 +1,16 @@
+[Unit]
+Description=DATUM advertiser co-signer (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/datum-labs/advertiser-cosigner
+EnvironmentFile=%h/.config/datum-relay/%i.env
+ExecStart=__NODE__ src/server.mjs
+Restart=on-failure
+RestartSec=3
+SyslogIdentifier=datum-cosigner-%i
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,21 @@
+{
+  "name": "datum-indexer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone whole-market event indexer for the DATUM ad exchange (Paseo Hub). Backfills + tails contract events into SQLite and serves network-effect metrics the per-wallet webapp dashboards can't compute.",
+  "scripts": {
+    "backfill": "node src/index.js backfill",
+    "start": "node src/index.js run",
+    "serve": "node src/serve.js",
+    "reset": "rm -f data/datum.db"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

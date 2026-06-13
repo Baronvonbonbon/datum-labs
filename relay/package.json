@@ -1,0 +1,25 @@
+{
+  "name": "datum-lab-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone DATUM relay for the lab: receives clicks + signed claim batches from the SDK/extension, co-signs as the publisher relay signer, and submits recordClick + settleSignedClaims on-chain. Trimmed, pine-free variant of datum/relay-bot.example.",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "inject": "node scripts/inject-claim.mjs",
+    "preflight": "node scripts/preflight.mjs",
+    "load": "node scripts/load.mjs",
+    "load-returning": "node scripts/load-returning.mjs",
+    "sign-withdraw": "node scripts/sign-withdraw.mjs",
+    "topup": "node scripts/topup.mjs",
+    "create-campaign": "node scripts/create-campaign.mjs",
+    "scenario": "node scripts/scenario.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

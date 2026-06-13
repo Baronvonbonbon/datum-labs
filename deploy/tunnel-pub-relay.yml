@@ -1,0 +1,9 @@
+# Standalone tunnel for the publisher relay (Option B).
+# Fill <TUNNEL_UUID> + credentials, route a hostname, then:
+#   cloudflared tunnel --config this-file.yml run
+tunnel: <TUNNEL_UUID>
+credentials-file: ~/.cloudflared/<TUNNEL_UUID>.json
+ingress:
+  - hostname: <pub-relay-host>
+    service: http://127.0.0.1:3410
+  - service: http_status:404

@@ -1,0 +1,16 @@
+[Unit]
+Description=DATUM relay (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/datum-labs/relay
+EnvironmentFile=%h/.config/datum-relay/%i.env
+ExecStart=__NODE__ src/index.mjs
+Restart=on-failure
+RestartSec=3
+SyslogIdentifier=datum-relay-%i
+
+[Install]
+WantedBy=default.target

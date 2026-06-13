@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DATUM — Network Effects</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+      :root { --bg:#0b0e14; --panel:#141925; --line:#232a3a; --txt:#e6e9f0; --mut:#8b93a7; --acc:#5eead4; }
+      * { box-sizing: border-box; }
+      body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+      header { padding:20px 24px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:16px; }
+      h1 { font-size:18px; margin:0; letter-spacing:.3px; }
+      .sub { color:var(--mut); font-size:12px; }
+      main { padding:24px; max-width:1200px; margin:0 auto; }
+      .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:24px; }
+      .kpi { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+      .kpi .v { font-size:22px; font-weight:700; }
+      .kpi .l { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-top:4px; }
+      .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+      .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+      .card h2 { font-size:13px; margin:0 0 12px; color:var(--mut); text-transform:uppercase; letter-spacing:.5px; }
+      table { width:100%; border-collapse:collapse; font-size:13px; }
+      th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+      th { color:var(--mut); font-weight:600; }
+      td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+      .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+      @media (max-width:820px){ .grid{grid-template-columns:1fr;} }
+      footer { color:var(--mut); font-size:11px; padding:0 24px 32px; max-width:1200px; margin:0 auto; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>DATUM · Network Effects</h1>
+      <span class="sub" id="status">loading…</span>
+    </header>
+    <main>
+      <div class="kpis" id="kpis"></div>
+      <div class="grid">
+        <div class="card"><h2>Settled DOT / day</h2><canvas id="settled"></canvas></div>
+        <div class="card"><h2>Impressions &amp; DAU / day</h2><canvas id="activity"></canvas></div>
+        <div class="card"><h2>Supply vs Demand growth (cumulative)</h2><canvas id="sides"></canvas></div>
+        <div class="card"><h2>Clearing-rate distribution</h2><canvas id="cpm"></canvas></div>
+        <div class="card"><h2>Top publishers by revenue</h2><div id="pubs"></div></div>
+        <div class="card"><h2>Top campaigns by spend</h2><div id="camps"></div></div>
+      </div>
+    </main>
+    <footer>
+      Whole-market view from the standalone indexer. Fill = settlement success rate (settled ÷ (settled+rejected)).
+      Liquidity = active campaigns ÷ registered publishers. eCPM = settled DOT per 1000 impressions.
+    </footer>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const get = (p) => fetch(p).then((r) => r.json());
+      const pct = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
+      const num = (x) => (x == null ? "—" : x.toLocaleString());
+      const dot = (x) => (x == null ? "—" : x.toLocaleString(undefined, { maximumFractionDigits: 3 }) + " DOT");
+
+      const KPIS = [
+        ["publishers", "Publishers", num],
+        ["activeCampaigns", "Active campaigns", num],
+        ["liquidityRatio", "Liquidity (D/S)", (x) => (x == null ? "—" : x.toFixed(2))],
+        ["impressions", "Impressions", num],
+        ["uniqueUsers", "Unique users", num],
+        ["settledDot", "Settled", dot],
+        ["ecpmDot", "eCPM", dot],
+        ["settlementSuccessRate", "Fill (success)", pct],
+        ["clicks", "Clicks", num],
+        ["protocolFeesDot", "Protocol fees", dot],
+      ];
+
+      const chartDefaults = { responsive: true, plugins: { legend: { labels: { color: "#8b93a7" } } },
+        scales: { x: { ticks: { color: "#8b93a7" }, grid: { color: "#232a3a" } }, y: { ticks: { color: "#8b93a7" }, grid: { color: "#232a3a" } } } };
+
+      async function main() {
+        const [s, ts, hist, pubs, camps, st] = await Promise.all([
+          get("/api/summary"), get("/api/timeseries"), get("/api/cpm-histogram"),
+          get("/api/top-publishers"), get("/api/top-campaigns"), get("/api/status"),
+        ]);
+
+        $("status").textContent = `cursor block ${st.cursor ?? "—"} · ${num(st.rawEvents)} events indexed`;
+        $("kpis").innerHTML = KPIS.map(([k, l, f]) => `<div class="kpi"><div class="v">${f(s[k])}</div><div class="l">${l}</div></div>`).join("");
+
+        const labels = ts.map((r) => r.date);
+        new Chart($("settled"), { type: "bar", data: { labels, datasets: [{ label: "DOT", data: ts.map((r) => r.settledDot), backgroundColor: "#5eead4" }] }, options: chartDefaults });
+        new Chart($("activity"), { type: "line", data: { labels, datasets: [
+          { label: "impressions", data: ts.map((r) => r.impressions), borderColor: "#5eead4", tension: .3 },
+          { label: "DAU", data: ts.map((r) => r.dau), borderColor: "#f0abfc", tension: .3 },
+        ] }, options: chartDefaults });
+
+        // cumulative supply/demand
+        let cp = 0, cc = 0;
+        const cumPub = ts.map((r) => (cp += r.newPublishers));
+        const cumCamp = ts.map((r) => (cc += r.newCampaigns));
+        new Chart($("sides"), { type: "line", data: { labels, datasets: [
+          { label: "publishers (supply)", data: cumPub, borderColor: "#5eead4", tension: .3 },
+          { label: "campaigns (demand)", data: cumCamp, borderColor: "#fbbf24", tension: .3 },
+        ] }, options: chartDefaults });
+
+        new Chart($("cpm"), { type: "bar", data: { labels: hist.map((h) => h.bucket), datasets: [{ label: "settlements", data: hist.map((h) => h.count), backgroundColor: "#818cf8" }] }, options: chartDefaults });
+
+        $("pubs").innerHTML = tbl(["Publisher", "Revenue", "Impr."], pubs.map((p) => [mono(p.publisher), dot(p.revenueDot), num(p.impressions)]));
+        $("camps").innerHTML = tbl(["#", "Advertiser", "Spend", "Budget %"], camps.map((c) => [c.campaign_id, mono(c.advertiser), dot(c.spentDot), c.budgetUtilization == null ? "—" : pct(c.budgetUtilization)]));
+      }
+      const mono = (a) => a ? `<span class="mono">${a.slice(0, 6)}…${a.slice(-4)}</span>` : "—";
+      const tbl = (head, rows) => `<table><thead><tr>${head.map((h, i) => `<th class="${i ? "n" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i ? "n" : ""}">${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+      main().catch((e) => ($("status").textContent = "error: " + e.message));
+    </script>
+  </body>
+</html>

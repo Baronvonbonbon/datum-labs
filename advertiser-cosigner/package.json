@@ -1,0 +1,10 @@
+{
+  "name": "datum-advertiser-cosigner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent advertiser-side co-signing service for DATUM dual-sig settlement. Holds ONLY the advertiser key; the publisher relay calls it for advertiserSig. This restores the dual-sig refutation guarantee that the lab's all-in-one relay defeated.",
+  "scripts": { "start": "node src/server.mjs" },
+  "dependencies": { "dotenv": "^16.4.5", "ethers": "^6.13.0" },
+  "engines": { "node": ">=18" }
+}

@@ -12,6 +12,7 @@ import { snapshot, eventsSince, bump, record } from "./telemetry.mjs";
 import { ready } from "./provider.mjs";
 import { HTTP_PORT, HTTP_BIND, RELAY_HMAC_SECRET } from "./config.mjs";
 import { verify } from "./auth.mjs";
+import { rateLimit } from "./ratelimit.mjs";
 import { submitWithdraw, withdrawInfo } from "./withdraw.mjs";
 import { log } from "./log.mjs";
 
@@ -37,6 +38,7 @@ async function route(req, res, ctx) {
   if (req.method === "GET" && p === "/events") return json(res, 200, { events: eventsSince(url.searchParams.get("since") ?? "0") });
 
   if (req.method === "POST" && p === "/click") {
+    const rl = rateLimit(req); if (!rl.ok) return tooMany(res, rl);
     const body = await readJson(req);
     if (!body.ok) return json(res, 400, { error: body.reason });
     if (!authed(req, body.raw)) return json(res, 401, { error: "unauthorized" });
@@ -44,6 +46,7 @@ async function route(req, res, ctx) {
     return json(res, r.ok ? 202 : 400, r);
   }
   if (req.method === "POST" && p === "/claim") {
+    const rl = rateLimit(req); if (!rl.ok) return tooMany(res, rl);
     const body = await readJson(req);
     if (!body.ok) return json(res, 400, { error: body.reason });
     if (!authed(req, body.raw)) return json(res, 401, { error: "unauthorized" });
@@ -57,6 +60,7 @@ async function route(req, res, ctx) {
     return json(res, 200, await withdrawInfo(url.searchParams.get("user") ?? ""));
   }
   if (req.method === "POST" && p === "/withdraw") {
+    const rl = rateLimit(req); if (!rl.ok) return tooMany(res, rl);
     const body = await readJson(req);
     if (!body.ok) return json(res, 400, { error: body.reason });
     if (!authed(req, body.raw)) return json(res, 401, { error: "unauthorized" });
@@ -86,6 +90,10 @@ function json(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
   res.end(body);
+}
+function tooMany(res, rl) {
+  res.setHeader("Retry-After", String(rl.retryAfter || 60));
+  return json(res, 429, { error: "rate-limited", scope: rl.scope, retryAfter: rl.retryAfter });
 }
 function readJson(req) {
   return new Promise((resolve) => {

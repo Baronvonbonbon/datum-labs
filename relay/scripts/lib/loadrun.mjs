@@ -38,7 +38,7 @@ export async function resolveWork({ relay, provider, ADDR, campaigns, rateOverri
 
     const tgt = await powTarget(provider, ADDR.powEngine, publisher, 1n).catch(() => null);
     work.push({
-      cid, publisher, ratePlanck: pf.plan.rate, powTarget: tgt,
+      cid, publisher, rateWei: pf.plan.rate, powTarget: tgt,
       expectedRelaySigner: pf.plan.pubSigPath?.expectedRelay ?? ZeroAddress,
       expectedAdvertiserRelaySigner: pf.plan.advSigPath?.expectedAdv ?? ZeroAddress,
     });
@@ -58,7 +58,7 @@ export async function runLoad({ relay, provider, ADDR, work, m0, usersPer, concu
   const t0 = Date.now();
   await pool(jobs, concurrency, async (w) => {
     const { envelope } = buildEnvelope({
-      campaignId: w.cid, publisher: w.publisher, user: freshUser(), ratePlanck: w.ratePlanck, head,
+      campaignId: w.cid, publisher: w.publisher, user: freshUser(), rateWei: w.rateWei, head,
       expectedRelaySigner: w.expectedRelaySigner, expectedAdvertiserRelaySigner: w.expectedAdvertiserRelaySigner,
       powTarget: w.powTarget,
     });

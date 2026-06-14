@@ -1,12 +1,15 @@
 // Exact on-chain fragments the relay submits, verified against alpha-core
-// (extension DatumSettlement.json + DatumClickRegistry.json). The Claim tuple
-// here is the 14-field settleSignedClaims variant (NOT the 17-field settleClaims
-// one — that path carries policyId/interestWeightBps/auctionRootCommit extras).
+// (IDatumSettlement.Claim / SignedClaimBatch). SLIM (#2): the per-claim wire
+// format carries only publisher/eventCount/rateWei/actionType + an optional
+// `proof` sidecar (ClaimProof[], 0 or 1 entries). campaignId + firstNonce live
+// at the batch level; nonce/prevHash/claimHash are derived on-chain (not sent).
+export const CLAIM_PROOF_TUPLE =
+  "(bytes32 clickSessionHash,bytes32 stakeRootUsed,bytes32 nullifier,bytes32 powNonce,bytes32[8] zkProof,bytes32[3] actionSig)";
 export const CLAIM_TUPLE =
-  "(uint256 campaignId,address publisher,uint256 eventCount,uint256 rateWei,uint8 actionType,bytes32 clickSessionHash,uint256 nonce,bytes32 previousClaimHash,bytes32 claimHash,bytes32[8] zkProof,bytes32 nullifier,bytes32 stakeRootUsed,bytes32[3] actionSig,bytes32 powNonce)";
+  `(address publisher,uint256 eventCount,uint256 rateWei,uint8 actionType,${CLAIM_PROOF_TUPLE}[] proof)`;
 
 export const SIGNED_BATCH_TUPLE =
-  `(address user,uint256 campaignId,${CLAIM_TUPLE}[] claims,uint256 deadlineBlock,address expectedRelaySigner,address expectedAdvertiserRelaySigner,bytes userSig,bytes publisherSig,bytes advertiserSig)`;
+  `(address user,uint256 campaignId,uint256 firstNonce,${CLAIM_TUPLE}[] claims,uint256 deadlineBlock,address expectedRelaySigner,address expectedAdvertiserRelaySigner,bytes userSig,bytes publisherSig,bytes advertiserSig)`;
 
 // Settlement custom errors so ethers can DECODE reverts (otherwise estimateGas
 // reverts surface as "unknown custom error" + a raw selector, and the relay can't
@@ -54,6 +57,7 @@ export const CLAIM_BATCH_TYPES = {
   ClaimBatch: [
     { name: "user", type: "address" },
     { name: "campaignId", type: "uint256" },
+    { name: "firstNonce", type: "uint256" },
     { name: "claimsHash", type: "bytes32" },
     { name: "deadlineBlock", type: "uint256" },
     { name: "expectedRelaySigner", type: "address" },

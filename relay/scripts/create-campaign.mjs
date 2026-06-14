@@ -14,8 +14,8 @@
 //   node scripts/create-campaign.mjs --publisher 0xPUB [flags]
 // Flags (defaults in []):
 //   --publisher 0x   bound publisher (must be registered)   [diana 0xca56…]
-//   --budget DOT     campaign escrow                          [0.5]
-//   --bid PLANCK     view CPM (ratePlanck, ≥ floor)           [2000000000 = 0.2 DOT]
+//   --budget PAS     campaign escrow (18-dec wei on-chain)    [0.5]
+//   --bid WEI        view CPM (rateWei, ≥ 1e15 floor)         [2000000000000000 = 0.002 PAS]
 //   --daily-cap DOT  per-pot daily cap                        [= budget]
 //   --rpc URL  --addresses PATH
 import { JsonRpcProvider, Wallet, parseUnits, getAddress } from "ethers";
@@ -29,7 +29,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: resolve(ROOT, ".env") });
 
 const DIANA = "0xcA5668fB864Acab0aC7f4CFa73949174720b58D0";
-const dotToPlanck = (d) => parseUnits(String(d), 10);
+const dotToWei = (d) => parseUnits(String(d), 18); // PAS → 18-dec wei (post-denomination; contract uses *Wei)
 
 function parseArgs(argv) {
   const a = {};
@@ -52,12 +52,12 @@ async function main() {
   const admin = new Wallet(adminKey, provider);
 
   const publisher = getAddress(a.publisher || DIANA);
-  const budget = dotToPlanck(a.budget || "0.5");
-  const dailyCap = a["daily-cap"] ? dotToPlanck(a["daily-cap"]) : budget;
-  const bid = BigInt(a.bid || "2000000000"); // 0.2 DOT CPM
+  const budget = dotToWei(a.budget || "0.5");
+  const dailyCap = a["daily-cap"] ? dotToWei(a["daily-cap"]) : budget;
+  const bid = BigInt(a.bid || "2000000000000000"); // 0.002 PAS CPM (18-dec wei, ≥ 1e15 floor)
 
   console.log(`Creating campaign: advertiser=${advertiser.address} publisher=${publisher}`);
-  console.log(`  budget=${a.budget || "0.5"} DOT  bidCPM=${bid} planck  dailyCap=${dailyCap}\n`);
+  console.log(`  budget=${a.budget || "0.5"} PAS  bidCPM=${bid} wei  dailyCap=${dailyCap}\n`);
 
   const { cid, active } = await createAndActivate({ ADDR, advertiser, admin, publisher, budgetPlanck: budget, dailyCapPlanck: dailyCap, bidPlanck: bid });
 

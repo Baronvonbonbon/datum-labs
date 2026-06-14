@@ -132,13 +132,20 @@ async function main() {
 
   const head = await provider.getBlockNumber();
   console.log(`\nFiring ${claims.length} claims, concurrency ${a.concurrency || 10}…`);
+  // SLIM TODO: returning users need firstNonce = lastNonce+1 and prevHash =
+  // previous on-chain claimHash, chained per user (and claims serialized per user
+  // so each settles before the next is built). This driver still uses firstNonce=1
+  // for every claim, so only each user's FIRST claim settles; reused-user
+  // follow-ups are skipped as stale (reason 1) or fail PoW. The compression
+  // measurement therefore needs that chaining before it's meaningful.
+  console.warn("WARN: SLIM returning-user nonce/prevHash chaining not implemented — only first-per-user claims will settle. See TODO.");
   let accepted = 0, rejected = 0;
   await pool(claims, Number(a.concurrency || 10), async (c) => {
     // PoW is per (user, eventCount) when enforced; w.powTarget != null gates it.
     const tgt = c.w.powTarget != null ? await powTarget(provider, ADDR.powEngine, c.user, c.eventCount).catch(() => null) : null;
     const { envelope } = buildEnvelope({
-      campaignId: c.w.cid, publisher: c.w.publisher, user: c.user, ratePlanck: c.w.ratePlanck, head,
-      eventCount: c.eventCount, nonce: 1n,
+      campaignId: c.w.cid, publisher: c.w.publisher, user: c.user, rateWei: c.w.rateWei, head,
+      eventCount: c.eventCount, firstNonce: 1n,
       expectedRelaySigner: c.w.expectedRelaySigner, expectedAdvertiserRelaySigner: c.w.expectedAdvertiserRelaySigner,
       powTarget: tgt,
     });

@@ -26,7 +26,7 @@
 //   --skip-preflight     bypass the preflight gate
 //   --force              proceed despite preflight blockers
 //   --dump               print the envelope, don't POST
-import { ZeroHash, ZeroAddress, getAddress, JsonRpcProvider } from "ethers";
+import { ZeroHash, ZeroAddress, getAddress, JsonRpcProvider, Contract } from "ethers";
 import { runPreflight, formatReport, loadAddresses } from "./preflight.mjs";
 import { buildEnvelope, powTarget, postClaim, freshUser } from "./lib/claim.mjs";
 
@@ -71,15 +71,27 @@ async function main() {
 
   const user = a.user ? getAddress(a.user) : freshUser();
   const eventCount = BigInt(a.events ?? "1");
-  const ratePlanck = BigInt(a.rate ?? "2000000");
+  const rateWei = BigInt(a.rate ?? "2000000000000000"); // 0.002 PAS (18-dec wei), ≥ CPM floor
+  const actionType = Number(a.action ?? 0);
   const head = await provider.getBlockNumber();
+
+  // SLIM: firstNonce = on-chain lastNonce(user, campaign, actionType) + 1. PoW +
+  // both signatures bind to it, so it must match what the contract assigns at
+  // settle time (a fresh user → 1, prevHash 0). Override with --nonce/--prev.
+  let firstNonce = a.nonce != null ? BigInt(a.nonce) : null;
+  if (firstNonce == null) {
+    const settlement = new Contract(ADDR.settlement, ["function lastNonce(address,uint256,uint8) view returns (uint256)"], provider);
+    firstNonce = (await settlement.lastNonce(user, campaignId, actionType)) + 1n;
+  }
+  const previousClaimHash = a.prev || ZeroHash;
+  if (firstNonce !== 1n && !a.prev) console.warn(`warn: firstNonce=${firstNonce} with no --prev — a returning user's claimHash needs the stored prevHash, or PoW/sigs will mismatch.`);
   const target = await powTarget(provider, ADDR.powEngine, user, eventCount).catch(() => null);
 
   const { envelope, powTries } = buildEnvelope({
-    campaignId, publisher, user, ratePlanck, head, eventCount,
-    actionType: Number(a.action ?? 0),
-    nonce: BigInt(a.nonce ?? "1"),
-    previousClaimHash: a.prev || ZeroHash,
+    campaignId, publisher, user, rateWei, head, eventCount,
+    actionType,
+    firstNonce,
+    previousClaimHash,
     deadlineOffset: BigInt(a["deadline-offset"] ?? "1000"),
     expectedRelaySigner: a["expected-relay"] || ZeroAddress,
     expectedAdvertiserRelaySigner: a["expected-adv"] || ZeroAddress,
@@ -92,7 +104,7 @@ async function main() {
     return;
   }
 
-  console.log(`→ POST ${relay}/claim  campaign=${campaignId} user=${user} rate=${ratePlanck} deadline=${envelope.deadlineBlock}`);
+  console.log(`→ POST ${relay}/claim  campaign=${campaignId} user=${user} firstNonce=${firstNonce} rate=${rateWei} deadline=${envelope.deadlineBlock}`);
   const { status, body } = await postClaim(relay, envelope);
   console.log(`← ${status}`, body);
   if (status >= 300) process.exit(1);

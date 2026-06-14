@@ -6,14 +6,13 @@
 // --reserve, and warns loudly when the master itself runs low — that low-master
 // warning is the signal to faucet more (the "sustained-faucet strategy").
 //
-// ── Paseo unit asymmetry (important) ──────────────────────────────────────────
-// pallet-revive's eth-rpc gateway is INCONSISTENT about decimals:
-//   • eth_getBalance returns 18-decimal WEI   (1 PAS = 1e18)
-//   • tx `value` is 10-decimal PLANCK          (1 PAS = 1e10)  ← verified against
-//     datum/alpha-core/scripts/setup-testnet.ts (LOCAL_DECIMAL_SCALE=1 on Paseo).
-// So balances/thresholds live in wei; the value we actually send is planck =
-// wei / 1e8. The send value is rounded DOWN to a multiple of 1e6 planck
-// (eth-rpc rejects value % 1e6 >= 500_000), and confirmation uses nonce-advance
+// ── Paseo units (post-denomination, 2026-06) ─────────────────────────────────
+// pallet-revive's eth-rpc gateway is now 18-decimal wei END TO END: both
+// eth_getBalance AND the tx `value` are 18-dec wei (1 PAS = 1e18). So balances,
+// thresholds, AND the send value are all wei — send the wei deficit directly
+// (no 1e8 scaling; the old 10-dec-planck value model was stale, like the
+// create-campaign budget bug). Value is rounded DOWN to a clean 1e6-wei multiple
+// (eth-rpc rejects value % 1e6 >= 500_000); confirmation uses nonce-advance
 // fallback (the gateway returns null receipts for mined txs).
 //
 // Targets: explicit --targets wins; otherwise derived from the keys in relay/.env
@@ -46,12 +45,11 @@ import { confirm } from "./lib/tx.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: resolve(ROOT, ".env") });
 
-const SCALE = 10n ** 8n; // wei (18-dec, getBalance) per planck (10-dec, tx value)
-const STEP = 1_000_000n; // Paseo value granularity in PLANCK (1e6)
-const wei = (d) => parseUnits(String(d), 18); // DOT → wei (balances/thresholds)
+// Paseo eth-rpc (post-denomination): balances AND tx value are 18-dec wei.
+const STEP = 1_000_000n; // round value down to a clean 1e6-wei multiple (eth-rpc rejects value % 1e6 >= 500_000)
+const wei = (d) => parseUnits(String(d), 18); // PAS → wei (balances / thresholds / tx value)
 const dotFromWei = (w) => formatUnits(w, 18);
-const dotFromPlanck = (p) => formatUnits(p, 10);
-const roundStep = (p) => p - (p % STEP); // round PLANCK down to a clean 1e6 multiple
+const roundStep = (w) => w - (w % STEP);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function parseArgs(argv) {
@@ -119,14 +117,14 @@ async function main() {
   console.log(`Targets (${targets.size}): ${[...targets].map(([ad, r]) => `${r}=${ad}`).join("  ")}`);
   console.log(`Policy: top up to ${a.to || 2.0} DOT when below ${a.min || 0.5}; keep master ≥ ${a.reserve || 1.0}${a.dry ? "  [DRY RUN]" : ""}\n`);
 
-  let totalSentPlanck = 0n;
+  let totalSent = 0n;
   let nonce = null;
 
   async function cycle() {
     let masterWei = await provider.getBalance(master.address);
     nonce = await provider.getTransactionCount(master.address, "pending");
     const ts = new Date().toISOString().slice(11, 19);
-    let sentPlanck = 0n, funded = 0;
+    let sent = 0n, funded = 0;
 
     for (const [addr, role] of targets) {
       const balWei = await provider.getBalance(addr).catch(() => null);
@@ -136,37 +134,36 @@ async function main() {
       }
       if (balWei >= minWei) continue; // healthy
 
-      // Deficit lives in wei; the value we send is planck = wei / 1e8.
-      let valuePlanck = roundStep((toWei - balWei) / SCALE);
-      if (valuePlanck === 0n) valuePlanck = STEP; // below min but deficit < 1 step → nudge
-      const valueWei = valuePlanck * SCALE;
+      // Tx value is 18-dec wei → send the wei deficit directly, rounded down to
+      // a clean 1e6-wei multiple.
+      const valueWei = roundStep(toWei - balWei) || STEP;
 
       // --dry is a pure plan view: show intended sends regardless of master balance.
       if (a.dry) {
-        console.log(`  [${ts}] would send ${dotFromPlanck(valuePlanck)} DOT → ${role} ${addr} (bal ${dotFromWei(balWei)})`);
-        sentPlanck += valuePlanck;
+        console.log(`  [${ts}] would send ${dotFromWei(valueWei)} PAS → ${role} ${addr} (bal ${dotFromWei(balWei)})`);
+        sent += valueWei;
         continue;
       }
 
       if (masterWei - valueWei < reserveWei) {
         console.warn(
-          `  [${ts}] ⚠ master LOW: ${dotFromWei(masterWei)} DOT — can't fund ${role} (${addr}) ` +
+          `  [${ts}] ⚠ master LOW: ${dotFromWei(masterWei)} PAS — can't fund ${role} (${addr}) ` +
             `without dropping below reserve ${a.reserve || 1.0}. FAUCET THE MASTER.`,
         );
         break;
       }
 
       try {
-        const tx = await master.sendTransaction({ to: addr, value: valuePlanck, nonce: nonce++ });
+        const tx = await master.sendTransaction({ to: addr, value: valueWei, nonce: nonce++ });
         const c = await confirm(provider, tx, master.address);
         if (c.status === 0) {
           console.error(`  [${ts}] ✗ topup reverted ${role} ${addr} (${tx.hash})`);
         } else {
           masterWei -= valueWei;
-          sentPlanck += valuePlanck;
-          totalSentPlanck += valuePlanck;
+          sent += valueWei;
+          totalSent += valueWei;
           funded++;
-          console.log(`  [${ts}] +${dotFromPlanck(valuePlanck)} DOT → ${role} ${addr}  (was ${dotFromWei(balWei)}) ${c.source === "receipt" ? "✓" : `(${c.source})`}`);
+          console.log(`  [${ts}] +${dotFromWei(valueWei)} PAS → ${role} ${addr}  (was ${dotFromWei(balWei)}) ${c.source === "receipt" ? "✓" : `(${c.source})`}`);
         }
       } catch (e) {
         console.error(`  [${ts}] ✗ send failed ${role} ${addr}: ${String(e?.message ?? e).slice(0, 120)}`);
@@ -175,7 +172,7 @@ async function main() {
     }
 
     if (funded || a.dry) {
-      console.log(`  [${ts}] cycle: funded ${funded}, sent ${dotFromPlanck(sentPlanck)} DOT, master ${dotFromWei(masterWei)} DOT, total this run ${dotFromPlanck(totalSentPlanck)} DOT`);
+      console.log(`  [${ts}] cycle: funded ${funded}, sent ${dotFromWei(sent)} PAS, master ${dotFromWei(masterWei)} DOT, total this run ${dotFromWei(totalSent)} PAS`);
     }
   }
 
@@ -185,7 +182,7 @@ async function main() {
   const interval = Number(a.interval || 60) * 1000;
   console.log(`\nLooping every ${a.interval || 60}s. Ctrl-C to stop.`);
   process.on("SIGINT", () => {
-    console.log(`\nStopped. Total sent this run: ${dotFromPlanck(totalSentPlanck)} DOT.`);
+    console.log(`\nStopped. Total sent this run: ${dotFromWei(totalSent)} PAS.`);
     process.exit(0);
   });
   for (;;) {

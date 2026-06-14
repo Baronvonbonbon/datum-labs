@@ -46,6 +46,9 @@ const PORT = Number(flag("monitor-port", "3500"));
 const BIND = flag("monitor-bind", "127.0.0.1");
 const INTERVAL = Number(flag("monitor-interval", "30")) * 1000;
 const WEBHOOK = (flag("alert-webhook", "") || "").trim();
+// "ntfy" (plain body + Title/Priority/Tags headers) or "json" ({text,title,level}).
+// Auto-detected for ntfy.sh URLs; override with ALERT_WEBHOOK_FORMAT.
+const WEBHOOK_FORMAT = (flag("alert-webhook-format", "") || (/ntfy/i.test(WEBHOOK) ? "ntfy" : "json")).toLowerCase();
 const HEARTBEAT_MIN = Number(flag("alert-heartbeat-min", "0"));
 
 const provider = new JsonRpcProvider(RPC_URL);
@@ -72,12 +75,20 @@ async function alert(level, key, text) {
   log(`ALERT[${level}] ${key}: ${text}`);
   if (!WEBHOOK) return;
   try {
-    await fetch(WEBHOOK, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: `[DATUM ${level}] ${text}`, title: key, level }),
-      signal: AbortSignal.timeout(5000),
-    });
+    const opts = WEBHOOK_FORMAT === "ntfy"
+      ? { // ntfy.sh: message in the body, metadata in headers (zero-signup push)
+          headers: {
+            "Title": `DATUM ${level}: ${key}`,
+            "Priority": level === "FIRING" ? "high" : "default",
+            "Tags": level === "FIRING" ? "rotating_light" : "white_check_mark",
+          },
+          body: text,
+        }
+      : { // generic JSON sink (Slack / Discord-slack / custom)
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: `[DATUM ${level}] ${key}: ${text}`, title: key, level }),
+        };
+    await fetch(WEBHOOK, { method: "POST", ...opts, signal: AbortSignal.timeout(5000) });
   } catch (e) { log("webhook failed:", String(e?.message ?? e).slice(0, 80)); }
 }
 

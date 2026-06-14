@@ -13,17 +13,21 @@ measurement — the harness is proven; the number is directional but low-volume.
 3. Indexer backfilled over the recent window; compression read from
    `indexer /api/aggregation` (`metrics.js::aggregation`, epoch = 14400 blocks).
 
-## Result (epoch 696)
-| metric | value |
-|---|---|
-| settled claims | 24 |
-| impressions | 78 |
-| distinct users | 14 |
-| distinct publishers | 1 |
-| distinct campaigns | 3 |
-| aggregatedRows (users+pubs+camps+1) | 19 |
-| **compressionVsClaims** | **1.26** |
-| **compressionVsImpressions** | **4.11** |
+## Result — two reuse regimes
+
+| metric | low reuse (1 claim/pair) | **heavy reuse (per-pair chains)** |
+|---|---|---|
+| settled claims | 24 | **202** (≥200 → trustworthy) |
+| impressions | 78 | 548 |
+| distinct users | 14 | 38 |
+| distinct campaigns | 3 | 3 |
+| **compressionVsClaims** | 1.26 | **4.3** |
+| **compressionVsImpressions** | 4.11 | **11.66** |
+
+The heavy-reuse run (pool 20 × 2 campaigns × `--per-pair 5`, 202 claims) clears the
+metric's own ≥200 trustworthiness bar. compressionVsClaims rises from 1.26 (mostly
+distinct users) to **4.3** as users repeat (the realistic-market shape); vsImpressions
+reaches **11.66**.
 
 ## Reading it
 - **Impression→claim netting already wins ~4×** (`compressionVsImpressions ≈ 4.11`):
@@ -39,19 +43,23 @@ measurement — the harness is proven; the number is directional but low-volume.
   not the order-of-magnitude that justifies the aggregation build.
 
 ## Decision implication
-**Do not build settlement aggregation (`DatumSettlementRoot`) yet.** The data says the
-big compression is already captured client-side (impression→claim, ~4×); the on-chain
-claim→row netting (~1.3–2.4×) doesn't clear the threshold. Per
-`SETTLEMENT-AGGREGATION-DESIGN.md`, revisit the **netting granularity** (e.g. per-user
-cross-campaign netting, longer epochs) before committing Solidity.
+**Hold on building settlement aggregation (`DatumSettlementRoot`) — it's borderline,
+lean no for now.** Even under heavy reuse, **claim→row netting is ~4.3×**, still under
+the design doc's **≥10 "build it"** rule of thumb (and in/just above its "~1–3 → revisit
+netting granularity" zone). Meanwhile the **impression→claim netting already wins ~11.7×
+client-side** (aggregated mode's `eventCount`, no new contract). So most of the
+compression is already captured for free; an on-chain checkpoint would add ~4× more at
+heavy reuse — real, but not the order-of-magnitude that clearly justifies the build +
+fraud-proof complexity. Revisit **netting granularity** (per-user cross-campaign netting,
+longer epochs) first, and re-measure if production reuse runs heavier than this.
 
-## Caveat / rigorous follow-up
-Volume is low (24 claims; the metric wants **≥200** to be trustworthy). The *direction*
-is clear (vsClaims stays low-single-digit under this netting model), but before any firm
-commit, run a sustained ≥200-claim load with a larger returning pool + `--per-pair` chains
-and re-read `/api/aggregation`. Everything needed is in place:
-`load-returning` (chain-aware) + the indexer aggregation endpoint + the relay/cosigner
-fleet.
+## Caveat / when to revisit
+The 202-claim run is trustworthy (≥200) but reuse here is synthetic (`--per-pair 5` on a
+20-user pool). The decision is reuse-sensitive: vsClaims scaled 1.26 → 4.3 as reuse rose,
+so if *real* users repeat even more heavily (or across many more campaigns) it could
+approach the ≥10 threshold. Re-run against real production traffic before a firm commit.
+Harness in place: `load-returning` (chain-aware) + indexer `/api/aggregation` + the
+relay/cosigner fleet.
 
 ## Repro
 ```bash

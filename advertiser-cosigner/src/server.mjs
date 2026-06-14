@@ -8,7 +8,7 @@ import { JsonRpcProvider, Wallet, Contract, getAddress, ZeroAddress } from "ethe
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAddresses } from "./registry.mjs";
-import { computeClaimsHash, signClaimBatch } from "./cosign.mjs";
+import { computeClaimsHash, signClaimBatch, normalizeClaim } from "./cosign.mjs";
 import { verify } from "./auth.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,16 +67,22 @@ async function cosign(body) {
     return { ok: false, reason: `not-my-campaign (advertiser=${advertiser}, expected signer=${mustBe}, I am ${wallet.address})` };
   }
 
+  // Normalize to the SLIM on-chain Claim shape (posted claims are JSON strings).
+  let claims;
+  try { claims = body.claims.map(normalizeClaim); } catch (e) { return { ok: false, reason: "bad-claim:" + (e?.message ?? "") }; }
+
   // Independent rate policy — refuse claims priced above the advertiser's cap.
   if (MAX_CPM > 0n) {
-    for (const c of body.claims) if (BigInt(c.ratePlanck ?? 0) > MAX_CPM) return { ok: false, reason: "rate-exceeds-policy" };
+    for (const c of claims) if (c.rateWei > MAX_CPM) return { ok: false, reason: "rate-exceeds-policy" };
   }
 
-  // Recompute the digest ourselves — never trust a caller-supplied claimsHash.
-  const claimsHash = computeClaimsHash(body.claims.map((c) => c.claimHash));
+  // Recompute the claimsHash + digest ourselves from the full claims — never
+  // trust a caller-supplied hash. SLIM: keccak(concat(keccak(abi.encode(Claim)))).
+  const claimsHash = computeClaimsHash(claims);
   const value = {
     user: getAddress(body.user),
     campaignId: cid,
+    firstNonce: BigInt(body.firstNonce),
     claimsHash,
     deadlineBlock: BigInt(body.deadlineBlock),
     expectedRelaySigner: body.expectedRelaySigner ? getAddress(body.expectedRelaySigner) : ZeroAddress,

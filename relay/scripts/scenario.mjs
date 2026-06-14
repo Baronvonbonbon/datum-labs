@@ -63,7 +63,7 @@ async function main() {
 
   const K = Number(a.campaigns || 3), users = Number(a.users || 5);
   const publisher = getAddress(a.publisher || DIANA);
-  const budget = parseUnits(String(a.budget || "0.5"), 10), bid = BigInt(a.bid || "2000000000");
+  const budget = parseUnits(String(a.budget || "0.5"), 18), bid = BigInt(a.bid || "2000000000000000"); // 18-dec wei; bid 0.002 PAS ≥ floor
   const port = Number(a.port || 3410), relay = `http://127.0.0.1:${port}`;
   const doIndex = !a["no-index"];
 

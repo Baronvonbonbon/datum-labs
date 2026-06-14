@@ -76,6 +76,14 @@ export class ClaimQueue {
     const deadlineBlock = BigInt(env.deadlineBlock ?? 0);
     if (deadlineBlock === 0n) return err("missing:deadlineBlock");
 
+    // SLIM: firstNonce anchors the signed batch to on-chain lastNonce+1. The
+    // client sets it (it must grind PoW against the same assigned nonce), and
+    // both publisher + advertiser sign over it. The contract skips the batch as
+    // stale if it no longer equals lastNonce+1 at submission time.
+    let firstNonce;
+    try { firstNonce = BigInt(env.firstNonce); } catch { return err("missing:firstNonce"); }
+    if (firstNonce <= 0n) return err("missing:firstNonce");
+
     let claims;
     try {
       claims = env.claims.map(normalizeClaim);
@@ -92,6 +100,7 @@ export class ClaimQueue {
     const batch = {
       user: env.user,
       campaignId,
+      firstNonce,
       claims,
       deadlineBlock,
       expectedRelaySigner,
@@ -324,9 +333,29 @@ async function cosignerFor(campaignId) {
   return null;
 }
 
+// Serialize a normalized SLIM claim for JSON (bigints → strings). The cosigner
+// recomputes keccak256(abi.encode(Claim)) over the full claim, so we send every
+// field — not a precomputed hash (SLIM has none).
+function serializeClaim(c) {
+  return {
+    publisher: c.publisher,
+    eventCount: c.eventCount.toString(),
+    rateWei: c.rateWei.toString(),
+    actionType: c.actionType,
+    proof: (c.proof ?? []).map((pf) => ({
+      clickSessionHash: pf.clickSessionHash,
+      stakeRootUsed: pf.stakeRootUsed,
+      nullifier: pf.nullifier,
+      powNonce: pf.powNonce,
+      zkProof: pf.zkProof,
+      actionSig: pf.actionSig,
+    })),
+  };
+}
+
 // Ask the independent advertiser co-signer for advertiserSig. It recomputes the
-// digest itself, so we only send the claim hashes + rate (for its policy) + the
-// envelope fields that bind the signature. Returns the sig or null (refused/down).
+// claimsHash + digest itself from the full SLIM claims + firstNonce, so it never
+// trusts a caller-supplied hash. Returns the sig or null (refused/down).
 async function fetchAdvertiserSig(batch) {
   const target = await cosignerFor(batch.campaignId);
   if (!target) { log.warn("no advertiser co-signer for campaign", { campaignId: batch.campaignId.toString() }); return null; }
@@ -334,10 +363,11 @@ async function fetchAdvertiserSig(batch) {
   const payload = {
     user: batch.user,
     campaignId: batch.campaignId.toString(),
+    firstNonce: batch.firstNonce.toString(),
     deadlineBlock: batch.deadlineBlock.toString(),
     expectedRelaySigner: batch.expectedRelaySigner,
     expectedAdvertiserRelaySigner: batch.expectedAdvertiserRelaySigner,
-    claims: batch.claims.map((c) => ({ claimHash: c.claimHash, rateWei: c.rateWei.toString() })),
+    claims: batch.claims.map(serializeClaim),
   };
   const bodyStr = JSON.stringify(payload);
   const headers = { "content-type": "application/json", ...(secret ? signHeaders(secret, bodyStr) : {}) };

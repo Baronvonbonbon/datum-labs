@@ -58,6 +58,15 @@ const flag = (v) => /^(1|true|yes)$/i.test((v || "").trim());
 export const RELAY_PUBLIC = flag(process.env.RELAY_PUBLIC);
 export const ALLOW_INSECURE_SELF_COSIGN = flag(process.env.ALLOW_INSECURE_SELF_COSIGN);
 
+// Rate limiting for the gas-spending POST endpoints (/claim, /click, /withdraw).
+// Caps griefing/gas-drain from the public tunnel. Loopback (the operator's own
+// load/inject scripts) is exempt. Sliding window per client IP (Cloudflare's
+// cf-connecting-ip when tunnelled) + a global cap that bounds total relay gas
+// burn regardless of source. 0 disables a limit.
+export const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
+export const RATE_LIMIT_PER_IP = Number(process.env.RATE_LIMIT_PER_IP || 30);   // per window per IP
+export const RATE_LIMIT_GLOBAL = Number(process.env.RATE_LIMIT_GLOBAL || 300);  // per window, all IPs
+
 export const CAMPAIGN_ALLOWLIST = (process.env.CAMPAIGN_ALLOWLIST || "")
   .split(",")
   .map((s) => s.trim())

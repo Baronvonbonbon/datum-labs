@@ -6,6 +6,7 @@ import { ClickBatch } from "./clicks.mjs";
 import { ClaimQueue } from "./claims.mjs";
 import { startHttp } from "./http.mjs";
 import { startAdmin } from "./admin.mjs";
+import { startRateLimitGc } from "./ratelimit.mjs";
 import { loadPolicy, acceptClaim, policySummary } from "./policy.mjs";
 import { log } from "./log.mjs";
 
@@ -23,6 +24,7 @@ async function main() {
   claimQueue.start();
   const server = startHttp({ clickBatch, claimQueue });
   const admin = startAdmin({ claimQueue, log });
+  startRateLimitGc();
 
   log.info("relay up", { policy: policySummary().source });
 

@@ -11,6 +11,7 @@ const counters = {
   claimErrors: 0,
   settledCount: 0,
   rejectedCount: 0,
+  rateLimited: 0,
 };
 
 const RING = 200;

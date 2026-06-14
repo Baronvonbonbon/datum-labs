@@ -12,6 +12,7 @@
     "load-returning": "node scripts/load-returning.mjs",
     "sign-withdraw": "node scripts/sign-withdraw.mjs",
     "topup": "node scripts/topup.mjs",
+    "monitor": "node scripts/monitor.mjs",
     "create-campaign": "node scripts/create-campaign.mjs",
     "scenario": "node scripts/scenario.mjs"
   },

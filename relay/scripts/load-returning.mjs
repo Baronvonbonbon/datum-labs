@@ -6,13 +6,19 @@
 // compression ratio (../indexer /api/aggregation) reflects a realistic market.
 //
 // Why this shape: claim hash-chains are per (user, campaign, actionType) with an
-// incrementing nonce. Firing several claims on the SAME chain concurrently races
-// the nonce and reverts (gap, reasonCode 7). So we model reuse on the
-// (user × campaign) bipartite graph instead: distribute K impressions across
-// pairs by the activity distribution, then emit ONE nonce=1 claim per distinct
-// pair with eventCount = the impressions that landed on it. Every claim is an
-// independent chain — no ordering hazard — and "returning" shows up as a user
-// appearing across many campaigns (one payout row, many claims/impressions).
+// incrementing nonce, so concurrent claims on the SAME chain race the nonce. We
+// model reuse on the (user × campaign) bipartite graph: distribute K impressions
+// across pairs by the activity distribution, then emit one claim per distinct
+// pair with eventCount = the impressions that landed on it. "Returning" shows up
+// as a user appearing across many campaigns (one payout row, many claims).
+//
+// SLIM chaining: each claim is anchored to its on-chain chain head — firstNonce =
+// lastNonce+1, prevHash = lastClaimHash — read fresh before building. Distinct
+// pairs are independent chains (run concurrently); claims within a pair are
+// serialized. This makes the driver RESUMABLE: re-running with the same --seed
+// advances each user's chain (nonce 2,3,…) instead of re-posting a stale nonce=1,
+// so cross-run reuse actually settles. --per-pair N drives a real N-deep chain
+// per pair (returns on the SAME campaign), each claim waiting for the prior.
 //
 // Usage:
 //   node scripts/load-returning.mjs --campaigns 158,169 --pool 50 --impressions 800
@@ -22,6 +28,7 @@
 //   --impressions K    total impressions to distribute            [500]
 //   --skew F           Zipf exponent for user activity (0=uniform) [1.0]
 //   --max-events N     cap eventCount per (user,campaign) claim    [25]
+//   --per-pair N       sequential claims per pair (real N-deep chain) [1]
 //   --seed S           derive a DETERMINISTIC pool from S so the
 //                      same users return ACROSS runs               [random]
 //   --rate PLANCK      override CPM (else each campaign's bid)
@@ -29,7 +36,7 @@
 //   --concurrency N    parallel POSTs                              [10]
 //   --relay URL [http://127.0.0.1:3400]  --rpc URL  --addresses PATH
 //   --dry              print the planned distribution, don't POST
-import { JsonRpcProvider, getAddress, keccak256, toUtf8Bytes } from "ethers";
+import { JsonRpcProvider, Contract, getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { loadAddresses } from "./preflight.mjs";
 import { resolveWork, getMetrics } from "./lib/loadrun.mjs";
 import { buildEnvelope, powTarget, postClaim, freshUser } from "./lib/claim.mjs";
@@ -130,30 +137,55 @@ async function main() {
     return;
   }
 
-  const head = await provider.getBlockNumber();
-  console.log(`\nFiring ${claims.length} claims, concurrency ${a.concurrency || 10}…`);
-  // SLIM TODO: returning users need firstNonce = lastNonce+1 and prevHash =
-  // previous on-chain claimHash, chained per user (and claims serialized per user
-  // so each settles before the next is built). This driver still uses firstNonce=1
-  // for every claim, so only each user's FIRST claim settles; reused-user
-  // follow-ups are skipped as stale (reason 1) or fail PoW. The compression
-  // measurement therefore needs that chaining before it's meaningful.
-  console.warn("WARN: SLIM returning-user nonce/prevHash chaining not implemented — only first-per-user claims will settle. See TODO.");
-  let accepted = 0, rejected = 0;
+  // SLIM chaining: each claim is anchored to the on-chain chain head for its
+  // (user, campaign, actionType) — firstNonce = lastNonce+1, prevHash =
+  // lastClaimHash — read fresh before building so PoW + both signatures bind to
+  // the value the contract will assign. This makes the driver:
+  //   • RESUMABLE / cross-run: re-running with the same --seed advances each
+  //     user's chain (nonce 2, 3, …) instead of re-posting a stale nonce=1;
+  //   • multi-claim: --per-pair N emits N sequential claims per pair, each
+  //     waiting for the prior to settle (a real hash-chain), exercising returns
+  //     on the SAME campaign, not just across campaigns.
+  // Distinct pairs are independent chains, so pairs still run concurrently; only
+  // claims WITHIN a pair are serialized (the nonce-race the old design avoided).
+  const ACTION = 0; // view
+  const perPair = Math.max(1, Number(a["per-pair"] || 1));
+  const settlement = new Contract(ADDR.settlement, [
+    "function lastNonce(address,uint256,uint8) view returns (uint256)",
+    "function lastClaimHash(address,uint256,uint8) view returns (bytes32)",
+  ], provider);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const waitForNonce = async (user, cid, target, tries = 40) => {
+    for (let i = 0; i < tries; i++) { if ((await settlement.lastNonce(user, cid, ACTION)) >= target) return true; await sleep(1500); }
+    return false;
+  };
+
+  console.log(`\nFiring ${claims.length} pair-chains × ${perPair} claim(s), concurrency ${a.concurrency || 10}…`);
+  let accepted = 0, rejected = 0, stalled = 0;
   await pool(claims, Number(a.concurrency || 10), async (c) => {
-    // PoW is per (user, eventCount) when enforced; w.powTarget != null gates it.
-    const tgt = c.w.powTarget != null ? await powTarget(provider, ADDR.powEngine, c.user, c.eventCount).catch(() => null) : null;
-    const { envelope } = buildEnvelope({
-      campaignId: c.w.cid, publisher: c.w.publisher, user: c.user, rateWei: c.w.rateWei, head,
-      eventCount: c.eventCount, firstNonce: 1n,
-      expectedRelaySigner: c.w.expectedRelaySigner, expectedAdvertiserRelaySigner: c.w.expectedAdvertiserRelaySigner,
-      powTarget: tgt,
-    });
-    const { status, body } = await postClaim(relay, envelope);
-    if (status === 202 && body.ok) accepted++;
-    else { rejected++; if (rejected <= 5) console.log(`  POST rejected: ${status} ${JSON.stringify(body)}`); }
+    for (let j = 0; j < perPair; j++) {
+      const head = await provider.getBlockNumber();
+      const lastN = await settlement.lastNonce(c.user, c.w.cid, ACTION);
+      const prevHash = await settlement.lastClaimHash(c.user, c.w.cid, ACTION);
+      const firstNonce = lastN + 1n;
+      // PoW is per (user, eventCount) when enforced; w.powTarget != null gates it.
+      const tgt = c.w.powTarget != null ? await powTarget(provider, ADDR.powEngine, c.user, c.eventCount).catch(() => null) : null;
+      const { envelope } = buildEnvelope({
+        campaignId: c.w.cid, publisher: c.w.publisher, user: c.user, rateWei: c.w.rateWei, head,
+        eventCount: c.eventCount, firstNonce, previousClaimHash: prevHash,
+        expectedRelaySigner: c.w.expectedRelaySigner, expectedAdvertiserRelaySigner: c.w.expectedAdvertiserRelaySigner,
+        powTarget: tgt,
+      });
+      const { status, body } = await postClaim(relay, envelope);
+      if (!(status === 202 && body.ok)) { rejected++; if (rejected <= 5) console.log(`  POST rejected: ${status} ${JSON.stringify(body)}`); break; }
+      accepted++;
+      // Serialize the chain: the next claim on this pair needs this one settled
+      // (firstNonce must equal lastNonce+1 at submission). Single-claim pairs
+      // don't wait — they're independent and settle in parallel.
+      if (perPair > 1 && !(await waitForNonce(c.user, c.w.cid, firstNonce))) { stalled++; console.log(`  chain stalled at nonce ${firstNonce} (${c.user.slice(0, 10)}…/${c.w.cid})`); break; }
+    }
   });
-  console.log(`Posted: ${accepted} accepted, ${rejected} rejected`);
+  console.log(`Posted: ${accepted} accepted, ${rejected} rejected${stalled ? `, ${stalled} chains stalled` : ""}`);
 
   const after = await getMetrics(relay);
   console.log("\nRelay delta:");

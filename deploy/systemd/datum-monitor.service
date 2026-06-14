@@ -1,0 +1,16 @@
+[Unit]
+Description=DATUM fleet monitor (relays+cosigners+chain+gas -> /metrics + alerts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/datum-labs/relay
+EnvironmentFile=-%h/.config/datum-relay/monitor.env
+ExecStart=__NODE__ scripts/monitor.mjs
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=datum-monitor
+
+[Install]
+WantedBy=default.target

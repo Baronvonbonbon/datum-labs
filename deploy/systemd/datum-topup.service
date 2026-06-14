@@ -1,0 +1,18 @@
+[Unit]
+Description=DATUM gas top-up loop (master EOA -> relay submitters)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/datum-labs/relay
+EnvironmentFile=%h/.config/datum-relay/topup.env
+# Refills the two relay submitters (diana, frank) from the faucet-funded master in
+# topup.env when they dip below --min PAS. Edit targets/thresholds here.
+ExecStart=__NODE__ scripts/topup.mjs --targets 0xcA5668fB864Acab0aC7f4CFa73949174720b58D0,0x92622970Bd48dD26c53bCCd09Aa6a0245dbc7620 --min 50 --to 200 --reserve 100 --interval 300
+Restart=on-failure
+RestartSec=10
+SyslogIdentifier=datum-topup
+
+[Install]
+WantedBy=default.target

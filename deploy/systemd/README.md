@@ -26,6 +26,18 @@ journalctl --user -u datum-relay@diana -f              # logs
 | `datum-relay@frank` | publisher relay (independent dual-sig demo) | 3410 → pub-relay.example.com | 3420 |
 | `datum-cosigner@bob` | advertiser co-signer for diana's campaigns | 3402 | — |
 | `datum-cosigner@charlie` | advertiser co-signer for frank's campaigns | 3411 → adv-cosign.example.com | — |
+| `datum-monitor` | fleet monitor — polls all of the above + chain + submitter gas; Prometheus `/metrics`, `/health`, state-change alerts (log + optional webhook) | 3500 (local) | — |
+| `datum-topup` | gas auto-topup — refills relay submitters from a faucet-funded master when low (needs `topup.env` with `MASTER_PRIVATE_KEY`) | — | — |
+
+### Monitor alerts
+
+`datum-monitor` fires FIRING/RESOLVED edges (never per-cycle spam) for: a relay or
+co-signer down/unhealthy, **co-signer down (dual-sig can't complete)**, submitter
+gas below `MIN_GAS_PAS`, relay queue backlog, a spike in `claimErrors`, and the
+chain not advancing. Set `ALERT_WEBHOOK` in `monitor.env` for a JSON `{text}` sink
+(Slack / ntfy / Discord-slack); otherwise alerts go to the journal
+(`journalctl --user -u datum-monitor -f`). Scrape `127.0.0.1:3500/metrics` with
+Prometheus for graphs.
 
 ## Hard-won operational notes
 

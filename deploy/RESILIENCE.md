@@ -63,9 +63,19 @@ an always-on host. The services are already portable — this is mostly copy + r
 - **Watchdog:** `datum-monitor` already alerts on down services / chain stall / low gas
   → make sure the ntfy topic is subscribed on your phone so you hear about outages.
 
-## Containerization (optional, portability)
+## Containerization — one-command deploy (`deploy/docker/`)
 
-For repeatable deploys, a `docker compose` with one service per unit (relay×2,
-cosigner×2, monitor, topup, indexer) + a cloudflared sidecar would make the host
-disposable. Not built yet — the systemd units are the current source of truth; add
-compose only if multi-host / k8s becomes the target.
+A full `docker compose` stack is now built (`deploy/docker/`): relay×2,
+cosigner×2, monitor, topup, indexer (run + API) + an optional cloudflared sidecar,
+self-contained via `DATUM_GOVERNANCE_ROUTER` (no sibling datum repo needed). For a
+VPS move, this replaces steps 3–7 above with:
+
+```bash
+cd datum-labs/deploy/docker
+for f in env/*.env.example; do cp "$f" "env/$(basename "$f" .example)"; done
+chmod 600 env/*.env            # then fill in the private keys
+docker compose up -d --build
+```
+
+See `deploy/docker/README.md`. The systemd units remain the current production
+source of truth; the compose is the portable/disposable-host alternative.

@@ -1,0 +1,105 @@
+# DATUM relay fleet — one-command deploy for a fresh host (RESILIENCE.md migration).
+# Mirrors the systemd fleet (relay×2, cosigner×2, monitor, topup, indexer) + an
+# optional Cloudflare tunnel. Self-contained: every service resolves contract
+# addresses from the on-chain registry via DATUM_GOVERNANCE_ROUTER — no sibling
+# datum repo needed.
+#
+# Setup:
+#   cp env/*.env.example env/<name>.env   # fill keys (chmod 600); see README.md
+#   docker compose up -d --build
+#
+# Secrets live ONLY in env/*.env (gitignored). Services reach each other by name
+# on the `datum` network (e.g. the relay calls http://cosigner-bob:3402).
+
+x-node: &node
+  build:
+    context: ../../relay
+    dockerfile: ../deploy/docker/Dockerfile
+  restart: unless-stopped
+  networks: [datum]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  cosigner-bob:
+    <<: *node
+    build:
+      context: ../../advertiser-cosigner
+      dockerfile: ../deploy/docker/Dockerfile
+    command: ["node", "src/server.mjs"]
+    env_file: [env/cosigner-bob.env]
+
+  cosigner-charlie:
+    <<: *node
+    build:
+      context: ../../advertiser-cosigner
+      dockerfile: ../deploy/docker/Dockerfile
+    command: ["node", "src/server.mjs"]
+    env_file: [env/cosigner-charlie.env]
+
+  relay-diana:
+    <<: *node
+    command: ["node", "src/index.mjs"]
+    env_file: [env/relay-diana.env]
+    volumes: ["./config/diana.config.json:/app/relay.config.json:ro"]   # per-instance publisher/campaign policy
+    depends_on: [cosigner-bob, cosigner-charlie]
+
+  relay-frank:
+    <<: *node
+    command: ["node", "src/index.mjs"]
+    env_file: [env/relay-frank.env]
+    volumes: ["./config/frank.config.json:/app/relay.config.json:ro"]
+    depends_on: [cosigner-bob, cosigner-charlie]
+
+  monitor:
+    <<: *node
+    command: ["node", "scripts/monitor.mjs"]
+    env_file: [env/monitor.env]
+    # Prometheus /metrics + /health, bound to all interfaces inside the container;
+    # exposed to the host on loopback only.
+    ports: ["127.0.0.1:3500:3500"]
+    depends_on: [relay-diana, relay-frank, cosigner-bob, cosigner-charlie]
+
+  topup:
+    <<: *node
+    command: ["sh", "-c", "node scripts/topup.mjs --targets $TOPUP_TARGETS --min 50 --to 200 --reserve 100 --interval 300"]
+    env_file: [env/topup.env]
+
+  indexer:
+    <<: *node
+    build:
+      context: ../../indexer
+      dockerfile: ../deploy/docker/Dockerfile
+    command: ["node", "src/index.js", "run"]
+    env_file: [env/indexer.env]
+    volumes: ["indexer-data:/app/data"]
+
+  indexer-api:
+    <<: *node
+    build:
+      context: ../../indexer
+      dockerfile: ../deploy/docker/Dockerfile
+    command: ["node", "src/serve.js"]
+    env_file: [env/indexer.env]
+    volumes: ["indexer-data:/app/data"]
+    ports: ["127.0.0.1:4319:4319"]
+    depends_on: [indexer]
+
+  # Cloudflare tunnel — fronts relay-diana (relay.javcon.io) etc. Uncomment + set
+  # TUNNEL_TOKEN (named tunnel) in env/cloudflared.env; point the dashboard
+  # ingress at http://relay-diana:3400 (and the cosigner/relay hosts as needed).
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   networks: [datum]
+  #   command: ["tunnel", "--no-autoupdate", "run"]
+  #   env_file: [env/cloudflared.env]   # TUNNEL_TOKEN=...
+  #   depends_on: [relay-diana]
+
+networks:
+  datum:
+    driver: bridge
+
+volumes:
+  indexer-data:

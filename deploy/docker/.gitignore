@@ -1,0 +1,3 @@
+# Real env files hold private keys — never commit. Only *.env.example are tracked.
+env/*.env
+cloudflared/

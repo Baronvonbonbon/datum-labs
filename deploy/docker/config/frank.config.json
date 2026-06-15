@@ -1,0 +1,6 @@
+{
+  "publishers": ["0x92622970Bd48dD26c53bCCd09Aa6a0245dbc7620"],
+  "campaigns": [],
+  "policy": { "maxCpmWei": "0" },
+  "signing": { "mode": "auto", "manualCampaigns": [] }
+}

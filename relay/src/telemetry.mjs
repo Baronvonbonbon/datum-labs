@@ -12,6 +12,9 @@ const counters = {
   settledCount: 0,
   rejectedCount: 0,
   rateLimited: 0,
+  bulletinRequests: 0,
+  bulletinServed: 0,
+  bulletinErrors: 0,
 };
 
 const RING = 200;

@@ -2,7 +2,7 @@
 // extension interoperate unchanged:
 //   GET  /metrics  /health  /events?since=N
 //   POST /click    /claim
-//   GET  /bulletin/<cid>  (501 — not wired in the lab relay)
+//   GET  /bulletin/<cid>  (proxies the creative from IPFS_GATEWAY)
 // PUBLIC API surface (tunnel-exposed). Write-y config + the rich dashboard live on
 // the separate LOCAL-only admin server (src/admin.mjs) and must never be here.
 //   GET  /health  /metrics  /events?since=N
@@ -14,6 +14,7 @@ import { HTTP_PORT, HTTP_BIND, RELAY_HMAC_SECRET } from "./config.mjs";
 import { verify } from "./auth.mjs";
 import { rateLimit } from "./ratelimit.mjs";
 import { submitWithdraw, withdrawInfo } from "./withdraw.mjs";
+import { fetchBulletin } from "./bulletin.mjs";
 import { policy } from "./policy.mjs";
 import { log } from "./log.mjs";
 
@@ -73,9 +74,24 @@ async function route(req, res, ctx) {
     return json(res, r.ok ? 202 : 400, r);
   }
   if (req.method === "GET" && p.startsWith("/bulletin/")) {
+    const rl = rateLimit(req); if (!rl.ok) return tooMany(res, rl);
     bump("bulletinRequests");
-    record("bulletin", { cid: p.slice("/bulletin/".length) });
-    return json(res, 501, { error: "bulletin-gateway-not-configured" });
+    // Only the CID — drop any trailing path/query/fragment the SDK might append.
+    const cid = decodeURIComponent(p.slice("/bulletin/".length)).split(/[/?#]/)[0];
+    record("bulletin", { cid });
+    const result = await fetchBulletin(cid);
+    if (result.status === 200) {
+      bump("bulletinServed");
+      res.writeHead(200, {
+        "Content-Type": result.contentType,
+        "Content-Length": result.body.length,
+        // Content-addressed → safe to cache hard.
+        "Cache-Control": "public, max-age=31536000, immutable",
+      });
+      return res.end(result.body);
+    }
+    bump("bulletinErrors");
+    return json(res, result.status, result.json);
   }
   json(res, 404, { error: "not-found" });
 }

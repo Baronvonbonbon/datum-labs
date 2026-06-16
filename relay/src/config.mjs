@@ -39,6 +39,10 @@ export const RELAY_HMAC_SECRET = (process.env.RELAY_HMAC_SECRET || "").trim();
 export const ADVERTISER_COSIGNER_SECRET = (process.env.ADVERTISER_COSIGNER_SECRET || "").trim();
 export const HTTP_PORT = Number(process.env.HTTP_PORT || 3400);
 export const HTTP_BIND = process.env.HTTP_BIND || "127.0.0.1";
+// IPFS gateway the /bulletin/<cid> endpoint proxies creatives from. Defaults to
+// the local Kubo gateway; override for a remote/public gateway. Trailing slashes
+// are trimmed — the CID is appended as `${IPFS_GATEWAY}/<cid>`.
+export const IPFS_GATEWAY = (process.env.IPFS_GATEWAY || "http://127.0.0.1:8090/ipfs").replace(/\/+$/, "");
 export const CLICK_BATCH_SIZE = Number(process.env.CLICK_BATCH_SIZE || 25);
 export const CLICK_BATCH_MAX_AGE_MS = Number(process.env.CLICK_BATCH_MAX_AGE_MS || 15000);
 export const CLAIM_BATCH_SIZE = Number(process.env.CLAIM_BATCH_SIZE || 1); // batches per tx (Paseo dual-sig cap ≈ 1)

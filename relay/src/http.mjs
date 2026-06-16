@@ -14,6 +14,7 @@ import { HTTP_PORT, HTTP_BIND, RELAY_HMAC_SECRET } from "./config.mjs";
 import { verify } from "./auth.mjs";
 import { rateLimit } from "./ratelimit.mjs";
 import { submitWithdraw, withdrawInfo } from "./withdraw.mjs";
+import { policy } from "./policy.mjs";
 import { log } from "./log.mjs";
 
 const MAX_BODY = 64 * 1024; // claim envelopes carry full Claim arrays
@@ -36,6 +37,10 @@ async function route(req, res, ctx) {
     return json(res, ok ? 200 : 503, { ok, ...snapshot() });
   }
   if (req.method === "GET" && p === "/events") return json(res, 200, { events: eventsSince(url.searchParams.get("since") ?? "0") });
+  // Approved publishers this relay co-signs for — public display metadata, no keys.
+  // The webapp demo fetches this to render its publisher/site list from the relay's
+  // real config instead of a hardcoded list.
+  if (req.method === "GET" && p === "/relay/publishers") return json(res, 200, { publishers: policy.publishers() });
 
   if (req.method === "POST" && p === "/click") {
     const rl = rateLimit(req); if (!rl.ok) return tooMany(res, rl);

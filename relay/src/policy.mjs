@@ -12,6 +12,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const cfg = {
   publishers: new Set(), // publishers this relay co-signs for (lowercased)
+  publisherMeta: {}, // lowercased address → { name, url, tags[], allowlist, description } (display only; exposed via /relay/publishers)
   campaigns: new Set(), // accepted campaign ids (string)
   maxCpmWei: 0n, // 0 = no cap
   signing: { mode: "auto", manualCampaigns: new Set() }, // auto | manual; per-campaign manual override
@@ -26,6 +27,7 @@ export function loadPolicy() {
     try {
       const j = JSON.parse(readFileSync(path, "utf8"));
       cfg.publishers = new Set((j.publishers || []).map((a) => String(a).toLowerCase()));
+      cfg.publisherMeta = normalizeMeta(j.publisherMeta);
       cfg.campaigns = new Set((j.campaigns || []).map(String));
       cfg.maxCpmWei = BigInt(j.policy?.maxCpmWei || "0");
       cfg.signing.mode = j.signing?.mode === "manual" ? "manual" : "auto";
@@ -40,10 +42,29 @@ export function loadPolicy() {
   return cfg;
 }
 
+// Keep only known display fields, keyed by lowercased address.
+function normalizeMeta(m) {
+  const out = {};
+  if (m && typeof m === "object") {
+    for (const [addr, v] of Object.entries(m)) {
+      if (!v || typeof v !== "object") continue;
+      out[String(addr).toLowerCase()] = {
+        name: v.name ?? "",
+        url: v.url ?? "",
+        tags: Array.isArray(v.tags) ? v.tags : [],
+        allowlist: !!v.allowlist,
+        description: v.description ?? "",
+      };
+    }
+  }
+  return out;
+}
+
 function persist() {
   if (!cfg.path) return;
   const out = {
     publishers: [...cfg.publishers],
+    publisherMeta: cfg.publisherMeta,
     campaigns: [...cfg.campaigns],
     policy: { maxCpmWei: cfg.maxCpmWei.toString() },
     signing: { mode: cfg.signing.mode, manualCampaigns: [...cfg.signing.manualCampaigns] },
@@ -79,10 +100,13 @@ export const policy = {
   setMaxCpm(v) { cfg.maxCpmWei = BigInt(v || "0"); persist(); },
   setSigningMode(mode) { cfg.signing.mode = mode === "manual" ? "manual" : "auto"; persist(); },
   setCampaignManual(id, manual) { if (manual) cfg.signing.manualCampaigns.add(String(id)); else cfg.signing.manualCampaigns.delete(String(id)); persist(); },
+  // Public display list of approved publishers (address + metadata; no keys).
+  publishers() { return [...cfg.publishers].map((a) => ({ address: a, ...(cfg.publisherMeta[a] || {}) })); },
   // Replace the whole config from a raw JSON string (advanced editor). Validates.
   setRaw(jsonStr) {
     const j = JSON.parse(jsonStr); // throws on bad JSON → caller returns 400
     cfg.publishers = new Set((j.publishers || []).map((a) => String(a).toLowerCase()));
+    cfg.publisherMeta = normalizeMeta(j.publisherMeta);
     cfg.campaigns = new Set((j.campaigns || []).map(String));
     cfg.maxCpmWei = BigInt(j.policy?.maxCpmWei || "0");
     cfg.signing.mode = j.signing?.mode === "manual" ? "manual" : "auto";
@@ -92,6 +116,7 @@ export const policy = {
   raw() {
     return JSON.stringify({
       publishers: [...cfg.publishers],
+      publisherMeta: cfg.publisherMeta,
       campaigns: [...cfg.campaigns],
       policy: { maxCpmWei: cfg.maxCpmWei.toString() },
       signing: { mode: cfg.signing.mode, manualCampaigns: [...cfg.signing.manualCampaigns] },
